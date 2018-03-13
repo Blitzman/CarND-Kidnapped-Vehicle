@@ -134,6 +134,93 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   and the following is a good resource for the actual equation to implement (look at equation 
 	//   3.33
 	//   http://planning.cs.uiuc.edu/node99.html
+
+  unsigned int num_landmarks = map_landmarks.landmark_list.size();
+  double sensor_range_2 = sensor_range * sensor_range;
+
+  // Fetch standard deviations.
+  double std_range = std_landmark[0];
+  double std_bearing = std_landmark[1];
+
+  for (unsigned int i = 0; i < num_particles; ++i) {
+
+    // Fetch current particle data.
+    double particle_x = particles[i].x;
+    double particle_y = particles[i].y;
+    double particle_theta = particles[i].theta;
+
+    // Get map landmark locations within sensor range.
+    std::vector<LandmarkObs> landmarks_in_range;
+
+    for (unsigned int j = 0; j < num_landmarks; ++j) {
+
+      // Fetch current landmark data.
+      float landmark_x = map_landmarks.landmark_list[j].x_f;
+      float landmark_y = map_landmarks.landmark_list[j].y_f;
+      int landmark_id = map_landmarks.landmark_list[j].id_i;
+
+      // Store landmark if in range.
+      if (dist(particle_x, particle_y, landmark_x, landmark_y) <= sensor_range_2)
+        landmarks_in_range.push_back(LandmarkObs{landmark_id, landmark_x, landmark_y});
+    }
+
+    // Transform observation coordinates to map coordinates.
+    std::vector<LandmarkObs> transformed_observations;
+
+    for (unsigned int j = 0; j < observations.size(); ++j) {
+
+      double x_t = cos(particle_theta) * observations[j].x - sin(particle_theta) * observations[j].y + particle_x;
+      double y_t = sin(particle_theta) * observations[j].x + cos(particle_theta) * observations[j].y + particle_y;
+      transformed_observations.push_back(LandmarkObs{observations[j].id, x_t, y_t});
+    }
+
+    // Associate transformed observations to landmarks.
+    dataAssociation(landmarks_in_range, transformed_observations);
+
+    // Calculate particle weight.
+    particles[i].weight = 1.0;
+
+    for (unsigned int j = 0; j < transformed_observations.size(); ++j) {
+
+      // Fetch current observation data.
+      double observation_x = transformed_observations[j].x;
+      double observation_y = transformed_observations[j].y;
+      int landmark_id = transformed_observations[j].id;
+
+      // Find associated landmark and fetch its data.
+      double landmark_in_range_x = 0.0;
+      double landmark_in_range_y = 0.0;
+      unsigned int k = 0;
+      unsigned int num_landmarks_in_range = landmarks_in_range.size();
+      bool found_landmark_in_range = false;
+
+      while (!found_landmark_in_range && k < num_landmarks_in_range) {
+
+        if (landmarks_in_range[k].id == landmark_id) {
+          
+          found_landmark_in_range = true;
+          landmark_in_range_x = landmarks_in_range[k].x;
+          landmark_in_range_y = landmarks_in_range[k].y;
+        }
+
+        ++k;
+      }
+
+      // Compute weight for the current observation.
+      double dist_x = observation_x - landmark_in_range_x;
+      double dist_y = observation_y - landmark_in_range_y;
+
+      double observation_weight = (1 / (2 * M_PI * std_range * std_bearing)) *
+                                  exp(
+                                      -(dist_x * dist_x / (2 * std_range * std_bearing) 
+                                      +(dist_y * dist_y / (2 * std_range * std_bearing))));
+
+      if (observation_weight == 0.0)
+        observation_weight = 0.00001;
+
+      particles[i].weight *= observation_weight;
+    }
+  }
 }
 
 void ParticleFilter::resample() {
